@@ -1,0 +1,15 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: argoev-github-ingress
+spec:
+  rules:
+  - http:
+      paths:
+      - backend:
+          service:
+            name: github-eventsource-svc
+            port:
+              number: 13000
+        path: /github-webhook
+        pathType: Exact

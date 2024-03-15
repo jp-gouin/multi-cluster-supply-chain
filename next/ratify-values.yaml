@@ -1,0 +1,16 @@
+cosign:
+  key: |
+    -----BEGIN PUBLIC KEY-----
+    MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEOYMk7g3WDKOOWsjyglpWGlb9qjGk
+    jGoRWx4efs3P0d0qk4uyDHybCXhqEIifiRFuZXCHSzdUi5egWF9PKfZbvQ==
+    -----END PUBLIC KEY-----
+sbom:
+  enabled: true
+  disallowedLicenses:
+  - "MPL"
+  #- "GPL-2.0-only"
+  disallowedPackages: 
+  - name: "busybox"
+    version: "1.36.1-r0"
+  #- name: "caffeine"
+  #  version: "3.1.6"

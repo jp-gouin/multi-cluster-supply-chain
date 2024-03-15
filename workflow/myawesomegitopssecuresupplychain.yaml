@@ -1,0 +1,314 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Sensor
+metadata:
+  name: github
+spec:
+  template:
+    serviceAccountName: operate-workflow-sa
+  dependencies:
+    - name: test-dep
+      eventSourceName: github
+      eventName: spring-petclinic
+      filters:
+        data:
+          # Type of Github event that triggered the delivery: [pull_request, push, issues, label, ...]
+          # https://docs.github.com/en/developers/webhooks-and-events/webhook-events-and-payloads
+          - path: headers.X-Github-Event
+            type: string
+            value:
+              - push
+  triggers:
+    - template:
+        name: github-workflow-trigger
+        k8s:
+          operation: create
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: secure-supp-chain-
+              spec:
+                entrypoint: my-awesome-supply-chain
+                onExit: exit-handler     
+                serviceAccountName: argo-workflow-sa # Set ServiceAccount
+                arguments:
+                  parameters:
+                  - name: "container-repo"
+                    value: "jpgouin"
+                  - name: "app-name"
+                    value: "spring-petclinic"
+                  - name: "app-repo"
+                    value: "https://github.com/spring-projects/spring-petclinic"
+                  - name: "app-revision"
+                    value: "3be289517d320a47bb8f359acc1d1daf0829ed0b"
+                volumes:
+                - name: my-secret-vol
+                  secret:
+                    secretName: dev-kubeconfig
+                - name: my-registry-secret
+                  secret:
+                    secretName: tutorial-registry-credentials
+                # This spec contains two templates: hello-hello-hello and whalesay
+                templates:
+                - name: my-awesome-supply-chain
+                  # Instead of just running a container
+                  # This template has a sequence of steps
+                  steps:
+                  - - name: vcluster            # hello1 is run before the following steps
+                      template: vcluster
+                  - - name: deploy-kpack           # double dash => run after previous step
+                      template: deploy-kpack
+                  - - name: build-code           # double dash => run after previous step
+                      template: build-code
+                  - - name: attest           # double dash => run after previous step
+                      template: attest
+                      arguments:
+                        parameters:
+                        # Pass the hello-param output from the generate-parameter step as the message input to print-message
+                        - name: build-sha
+                          value:  "{{steps.build-code.outputs.parameters.build-sha}}"
+                  - - name: create-deployment           # double dash => run after previous step
+                      template: create-deployment
+                      arguments:
+                        parameters:
+                        # Pass the hello-param output from the generate-parameter step as the message input to print-message
+                        - name: build-sha
+                          value: "{{steps.build-code.outputs.parameters.build-sha}}"
+                  - - name: create-svc           # double dash => run after previous step
+                      template: create-svc       
+                  - - name: create-ingress           # double dash => run after previous step
+                      template: create-ingress      
+                - name: exit-handler     
+                  script:
+                    image: jpgouin/vcluster-cli
+                    command: [/bin/sh]
+                    source: |
+                      export KUBECONFIG=/secret/mountpath/chain-dev.config
+                      vcluster delete my-vcluster -n vcluster-{{workflow.name}}
+                    volumeMounts:
+                    - name: my-secret-vol     # mount file containing secret at /secret/mountpath
+                      mountPath: "/secret/mountpath"
+                - name: vcluster
+                  container:
+                    image: alpine/helm
+                    command: [helm]
+                    args: 
+                    - --kubeconfig 
+                    - /secret/mountpath/chain-dev.config
+                    - upgrade
+                    - --install
+                    - my-vcluster
+                    - vcluster
+                    - --repo
+                    - https://charts.loft.sh
+                    - --namespace 
+                    - vcluster-{{workflow.name}}
+                    - --create-namespace
+                    - --repository-config=''
+                    - --set 
+                    - isolation.enabled=true
+                    # To access secrets as environment variables, use the k8s valueFrom and
+                    # secretKeyRef constructs.
+                    volumeMounts:
+                    - name: my-secret-vol     # mount file containing secret at /secret/mountpath
+                      mountPath: "/secret/mountpath"
+                - name: deploy-kpack
+                  script:
+                    image: jpgouin/vcluster-cli
+                    command: [/bin/sh]
+                    source: |
+                      export KUBECONFIG=/secret/mountpath/chain-dev.config
+
+                      serviceaccount=$(cat <<EOF 
+                      apiVersion: v1
+                      kind: ServiceAccount
+                      metadata:
+                        name: tutorial-service-account
+                        namespace: default
+                      secrets:
+                      - name: tutorial-registry-credentials
+                      imagePullSecrets:
+                      - name: tutorial-registry-credentials
+                      EOF
+                      )
+
+                      clusterstore=$(cat <<EOF 
+                      apiVersion: kpack.io/v1alpha2
+                      kind: ClusterStore
+                      metadata:
+                        name: default
+                      spec:
+                        sources:
+                        - image: gcr.io/paketo-buildpacks/java
+                        - image: gcr.io/paketo-buildpacks/nodejs
+                      EOF
+                      )
+
+                      clusterstack=$(cat <<EOF
+                          apiVersion: kpack.io/v1alpha2
+                          kind: ClusterStack
+                          metadata:
+                            name: base
+                          spec:
+                            id: "io.buildpacks.stacks.jammy"
+                            buildImage:
+                              image: "paketobuildpacks/build-jammy-base"
+                            runImage:
+                              image: "paketobuildpacks/run-jammy-base"
+                      EOF
+                      )
+
+                      builder=$(cat <<EOF 
+                      apiVersion: kpack.io/v1alpha2
+                      kind: Builder
+                      metadata:
+                        name: my-builder
+                        namespace: default
+                      spec:
+                        serviceAccountName: tutorial-service-account
+                        tag: {{workflow.parameters.container-repo}}/builder
+                        stack:
+                          name: base
+                          kind: ClusterStack
+                        store:
+                          name: default
+                          kind: ClusterStore
+                        order:
+                        - group:
+                          - id: paketo-buildpacks/java
+                        - group:
+                          - id: paketo-buildpacks/nodejs
+                      EOF
+                      )
+                      vcluster connect my-vcluster -n vcluster-{{workflow.name}} -- kubectl apply -f https://github.com/buildpacks-community/kpack/releases/download/v0.13.2/release-0.13.2.yaml
+                      vcluster connect my-vcluster -n vcluster-{{workflow.name}} -- kubectl create secret -n default docker-registry tutorial-registry-credentials --from-file=.dockerconfigjson=/config/config.json
+                      echo "$serviceaccount" | vcluster connect my-vcluster -n vcluster-{{workflow.name}} -- kubectl apply -f -
+                      echo "$clusterstore" | vcluster connect my-vcluster -n vcluster-{{workflow.name}} -- kubectl apply -f -
+                      echo "$clusterstack" | vcluster connect my-vcluster -n vcluster-{{workflow.name}} -- kubectl apply -f -
+                      echo "$builder" | vcluster connect my-vcluster -n vcluster-{{workflow.name}} -- kubectl apply -f -
+                    volumeMounts:
+                    - name: my-secret-vol     # mount file containing secret at /secret/mountpath
+                      mountPath: "/secret/mountpath"
+                    - name: my-registry-secret     # mount file containing secret at /secret/mountpath
+                      mountPath: "/config"
+                - name: build-code
+                  script:
+                    image: jpgouin/vcluster-cli
+                    command: [/bin/sh]
+                    source: |
+                      sleep 10
+                      export KUBECONFIG=/secret/mountpath/chain-dev.config
+                      vcluster connect my-vcluster -n vcluster-{{workflow.name}} -- kubectl wait -n default --for=condition=ready builder my-builder
+                      vcluster connect my-vcluster -n vcluster-{{workflow.name}} -- kp image create tutorial-image --builder my-builder --service-account tutorial-service-account --tag {{workflow.parameters.container-repo}}/{{workflow.parameters.app-name}} --git {{workflow.parameters.app-repo}} --git-revision {{workflow.parameters.app-revision}} -w | tee /tmp/kp.build
+                      cat /tmp/kp.build
+                      awk '{match($0, /sha256:[0-9a-f]+/); if (RSTART) {hash=substr($0, RSTART, RLENGTH)}} END{print hash}' /tmp/kp.build > /tmp/app.sha
+                    volumeMounts:
+                    - name: my-secret-vol     # mount file containing secret at /secret/mountpath
+                      mountPath: "/secret/mountpath"
+                  outputs:
+                    parameters:
+                    - name: build-sha  # name of output parameter
+                      valueFrom:
+                        path: /tmp/app.sha
+                - name: attest
+                  inputs:
+                    parameters:
+                    - name: build-sha
+                  script:
+                    image: jpgouin/vcluster-cli
+                    command: [/bin/sh]
+                    source: |
+                      cosign sign --key k8s://argo/cosign {{workflow.parameters.container-repo}}/{{workflow.parameters.app-name}}@{{inputs.parameters.build-sha}} -y
+                      syft scan {{workflow.parameters.container-repo}}/{{workflow.parameters.app-name}} -o spdx-json=spring-project-spdx-json.json
+                      cosign attest --predicate spring-project-spdx-json.json --type spdxjson --key k8s://argo/cosign  {{workflow.parameters.container-repo}}/{{workflow.parameters.app-name}}@{{inputs.parameters.build-sha}} -y
+                      
+                      # Ratify do not support yet sbom-attestation https://github.com/deislabs/ratify/issues/777
+                      oras attach --artifact-type application/spdx+json index.docker.io/{{workflow.parameters.container-repo}}/{{workflow.parameters.app-name}}@{{inputs.parameters.build-sha}} spring-project-spdx-json.json
+                      
+                      cosign verify-attestation {{workflow.parameters.container-repo}}/{{workflow.parameters.app-name}}@{{inputs.parameters.build-sha}} --key k8s://argo/cosign --type spdxjson --output-file /tmp/attestation.json
+                      cat /tmp/attestation.json
+                    env:
+                    - name: DOCKER_CONFIG
+                      value: "/config"
+                    volumeMounts:
+                    - name: my-registry-secret     # mount file containing secret at /secret/mountpath
+                      mountPath: "/config"
+                - name: create-deployment
+                  inputs:
+                    parameters:
+                    - name: build-sha
+                  resource:                   # indicates that this is a resource template
+                    action: apply            # can be any kubectl action (e.g. create, delete, apply, patch)
+                    manifest: |               #put your kubernetes spec here
+                      apiVersion: apps/v1
+                      kind: Deployment
+                      metadata:
+                        name: spring-petclinic
+                        namespace: app
+                      spec:
+                        replicas: 1
+                        selector:
+                          matchLabels:
+                            app: spring-petclinic
+                        template:
+                          metadata:
+                            labels:
+                              app: spring-petclinic
+                          spec:
+                            containers:
+                            - name: spring-petclinic
+                              image: {{workflow.parameters.container-repo}}/{{workflow.parameters.app-name}}@{{inputs.parameters.build-sha}}
+                              ports:
+                              - containerPort: 8080
+                - name: create-svc
+                  resource:                   # indicates that this is a resource template
+                    action: apply            # can be any kubectl action (e.g. create, delete, apply, patch)
+                    manifest: |               #put your kubernetes spec here
+                      apiVersion: v1
+                      kind: Service
+                      metadata:
+                        name: spring-petclinic
+                        namespace: app
+                      spec:
+                        selector:
+                          app: spring-petclinic
+                        ports:
+                          - protocol: TCP
+                            port: 80
+                            targetPort: 8080
+                - name: create-ingress
+                  resource:                   # indicates that this is a resource template
+                    action: apply            # can be any kubectl action (e.g. create, delete, apply, patch)
+                    manifest: |               #put your kubernetes spec here
+                      apiVersion: networking.k8s.io/v1
+                      kind: Ingress
+                      metadata:
+                        name: spring-petclinic-ingress
+                        namespace: app
+                      spec:
+                        rules:
+                        - host: spring-petclinic.chain-prod.com
+                          http:
+                            paths:
+                            - path: /
+                              pathType: Prefix
+                              backend:
+                                service:
+                                  name: spring-petclinic
+                                  port:
+                                    number: 80
+                
+          parameters:
+            - src:
+                dependencyName: test-dep
+                dataKey: body.repository.name
+              dest: spec.arguments.parameters.1.value
+            - src:
+                dependencyName: test-dep
+                dataKey: body.repository.html_url
+              dest: spec.arguments.parameters.2.value
+            - src:
+                dependencyName: test-dep
+                dataKey: body.after
+              dest: spec.arguments.parameters.3.value

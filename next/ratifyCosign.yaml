@@ -1,0 +1,20 @@
+apiVersion: config.ratify.deislabs.io/v1beta1
+kind: Verifier
+metadata:
+  name: verifier-cosign
+spec:
+  name: cosign
+  artifactTypes: application/vnd.dev.cosign.artifact.sig.v1+json
+  parameters:
+    key: LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFT1lNazdnM1dES09PV3NqeWdscFdHbGI5cWpHawpqR29SV3g0ZWZzM1AwZDBxazR1eURIeWJDWGhxRUlpZmlSRnVaWENIU3pkVWk1ZWdXRjlQS2ZaYnZRPT0KLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tCgo=
+---
+apiVersion: config.ratify.deislabs.io/v1beta1
+kind: Store
+metadata:
+  name: store-oras
+spec:
+  name: oras
+  parameters:
+    cacheEnabled: true
+    cosignEnabled: true
+    ttl: 10

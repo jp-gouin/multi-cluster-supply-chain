@@ -1,0 +1,29 @@
+# Info on GitHub Webhook: https://developer.github.com/v3/repos/hooks/#create-a-hook
+apiVersion: argoproj.io/v1alpha1
+kind: EventSource
+metadata:
+  name: github
+spec:
+  service:
+    ports:
+      - name: spring-petclinic
+        port: 13000
+        targetPort: 13000
+  github:
+    spring-petclinic:
+      owner: ""
+      repository: "spring-petclinic"
+      webhook:
+        endpoint: "/github-webhook"
+        port: "13000"
+        method: "POST"
+        url: http://<vm-ip>:33080
+      events:
+        - "*"
+      apiToken:
+        name: github-access
+        key: token
+      insecure: true
+      active: true
+      contentType: "json"
+
