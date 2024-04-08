@@ -765,102 +765,46 @@ extraObjects: []
 useStaticCredentials: true
 artifactRepository:
   # -- Archive the main container logs as an artifact
-  archiveLogs: false
+  archiveLogs: true
   # -- Store artifact in a S3-compliant object store
   # @default -- See [values.yaml]
-  s3: {}
-    # # Note the `key` attribute is not the actual secret, it's the PATH to
-    # # the contents in the associated secret, as defined by the `name` attribute.
-    # accessKeySecret:
-    #   name: "{{ .Release.Name }}-minio"
-    #   key: accesskey
-    # secretKeySecret:
-    #   name: "{{ .Release.Name }}-minio"
-    #   key: secretkey
-    # # insecure will disable TLS. Primarily used for minio installs not configured with TLS
-    # insecure: false
-    # caSecret:
-    #   name: ca-root
-    #   key: cert.pem
-    # bucket:
-    # endpoint:
-    # region:
-    # roleARN:
-    # useSDKCreds: true
-    # encryptionOptions:
-    #   enableEncryption: true
-  # -- Store artifact in a GCS object store
-  # @default -- `{}` (See [values.yaml])
-  gcs: {}
-    # bucket: <project>-argo
-    # keyFormat: "{{ \"{{workflow.namespace}}/{{workflow.name}}/{{pod.name}}\" }}"
-    # # serviceAccountKeySecret is a secret selector.
-    # # It references the k8s secret named 'my-gcs-credentials'.
-    # # This secret is expected to have have the key 'serviceAccountKey',
-    # # containing the base64 encoded credentials
-    # # to the bucket.
-    # #
-    # # If it's running on GKE and Workload Identity is used,
-    # # serviceAccountKeySecret is not needed.
-    # serviceAccountKeySecret:
-    #   name: my-gcs-credentials
-    #   key: serviceAccountKey
-  # -- Store artifact in Azure Blob Storage
-  # @default -- `{}` (See [values.yaml])
-  azure: {}
-    # endpoint: https://mystorageaccountname.blob.core.windows.net
-    # container: my-container-name
-    # blobNameFormat: path/in/container
-    # # accountKeySecret is a secret selector.
-    # # It references the k8s secret named 'my-azure-storage-credentials'.
-    # # This secret is expected to have have the key 'account-access-key',
-    # # containing the base64 encoded credentials to the storage account.
-    # # If a managed identity has been assigned to the machines running the
-    # # workflow (e.g., https://docs.microsoft.com/en-us/azure/aks/use-managed-identity)
-    # # then accountKeySecret is not needed, and useSDKCreds should be
-    # # set to true instead:
-    # useSDKCreds: true
-    # accountKeySecret:
-    #   name: my-azure-storage-credentials
-    #   key: account-access-key
-
-# -- The section of custom artifact repository.
-# Utilize a custom artifact repository that is not one of the current base ones (s3, gcs, azure)
-customArtifactRepository: {}
-# artifactory:
-#   repoUrl: https://artifactory.example.com/raw
-#   usernameSecret:
-#     name: artifactory-creds
-#     key: username
-#   passwordSecret:
-#     name: artifactory-creds
-#     key: password
+  s3: 
+    accessKeySecret:
+      name: "minio-api-key"
+      key: accesskey
+    secretKeySecret:
+      name: "minio-api-key"
+      key: secretkey
+    # insecure will disable TLS. Primarily used for minio installs not configured with TLS
+    insecure: true
+    bucket: argo
+    endpoint: minio:9000
 
 # -- The section of [artifact repository ref](https://argo-workflows.readthedocs.io/en/stable/artifact-repository-ref/).
 # Each map key is the name of configmap
 # @default -- `{}` (See [values.yaml])
-artifactRepositoryRef: {}
+artifactRepositoryRef: 
   # # -- 1st ConfigMap
   # # If you want to use this config map by default, name it "artifact-repositories".
   # # Otherwise, you can provide a reference to a
   # # different config map in `artifactRepositoryRef.configMap`.
-  # artifact-repositories:
-  #   # -- v3.0 and after - if you want to use a specific key, put that key into this annotation.
-  #   annotations:
-  #     workflows.argoproj.io/default-artifact-repository: default-v1-s3-artifact-repository
-  #   # 1st data of configmap. See above artifactRepository or customArtifactRepository.
-  #   default-v1-s3-artifact-repository:
-  #     archiveLogs: false
-  #     s3:
-  #       bucket: my-bucket
-  #       endpoint: minio:9000
-  #       insecure: true
-  #       accessKeySecret:
-  #         name: my-minio-cred
-  #         key: accesskey
-  #       secretKeySecret:
-  #         name: my-minio-cred
-  #         key: secretkey
+  artifact-repositories:
+    # -- v3.0 and after - if you want to use a specific key, put that key into this annotation.
+    annotations:
+      workflows.argoproj.io/default-artifact-repository: default-v1-s3-artifact-repository
+    # 1st data of configmap. See above artifactRepository or customArtifactRepository.
+    default-v1-s3-artifact-repository:
+      archiveLogs: false
+      s3:
+        bucket: argo
+        endpoint: minio:9000
+        insecure: true
+        accessKeySecret:
+          name: "minio-api-key"
+          key: accesskey
+        secretKeySecret:
+          name: "minio-api-key"
+          key: secretkey
   #    # 2nd data
   #    oss-artifact-repository:
   #      archiveLogs: false

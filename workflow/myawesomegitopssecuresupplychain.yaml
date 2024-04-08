@@ -30,6 +30,8 @@ spec:
                 generateName: secure-supp-chain-
               spec:
                 entrypoint: my-awesome-supply-chain
+                imagePullSecrets:
+                - name: tutorial-registry-credentials
                 onExit: exit-handler     
                 serviceAccountName: argo-workflow-sa # Set ServiceAccount
                 arguments:
@@ -49,6 +51,9 @@ spec:
                 - name: my-registry-secret
                   secret:
                     secretName: tutorial-registry-credentials
+                - name: dependency-track-key
+                  secret:
+                    secretName: dependency-track-key
                 # This spec contains two templates: hello-hello-hello and whalesay
                 templates:
                 - name: my-awesome-supply-chain
@@ -68,6 +73,12 @@ spec:
                         # Pass the hello-param output from the generate-parameter step as the message input to print-message
                         - name: build-sha
                           value:  "{{steps.build-code.outputs.parameters.build-sha}}"
+                  - - name: dependency-track           # double dash => run after previous step
+                      template: dependency-track
+                      arguments:
+                        parameters:
+                        - name: depencendy-track-url
+                          value: "http://188.165.247.177:8086"
                   - - name: create-deployment           # double dash => run after previous step
                       template: create-deployment
                       arguments:
@@ -221,6 +232,7 @@ spec:
                     source: |
                       cosign sign --key k8s://argo/cosign {{workflow.parameters.container-repo}}/{{workflow.parameters.app-name}}@{{inputs.parameters.build-sha}} -y
                       syft scan {{workflow.parameters.container-repo}}/{{workflow.parameters.app-name}} -o spdx-json=spring-project-spdx-json.json
+                      syft scan {{workflow.parameters.container-repo}}/{{workflow.parameters.app-name}} -o cyclonedx-json=/tmp/spring-project-cycdx-json.json
                       cosign attest --predicate spring-project-spdx-json.json --type spdxjson --key k8s://argo/cosign  {{workflow.parameters.container-repo}}/{{workflow.parameters.app-name}}@{{inputs.parameters.build-sha}} -y
                       
                       # Ratify do not support yet sbom-attestation https://github.com/deislabs/ratify/issues/777
@@ -234,6 +246,42 @@ spec:
                     volumeMounts:
                     - name: my-registry-secret     # mount file containing secret at /secret/mountpath
                       mountPath: "/config"
+                  outputs:
+                    artifacts:
+                    - name: spring-project-cycdx-json
+                      path: /tmp/spring-project-cycdx-json.json
+                      s3:
+                        key: spring-project-cycdx-json.json
+                - name: dependency-track
+                  inputs:
+                    artifacts:
+                    - name: spring-project-cycdx-json
+                      path: /tmp/spring-project-cycdx-json.json
+                      s3:
+                        key: spring-project-cycdx-json.json
+                    parameters:
+                    - name: depencendy-track-url
+                  script:
+                    image: curlimages/curl
+                    command: [curl]
+                    args: 
+                    - -X
+                    - "POST"
+                    - "{{inputs.parameters.depencendy-track-url}}/api/v1/bom"
+                    - -H 
+                    - 'Content-Type: multipart/form-data'
+                    - -H 
+                    - 'X-API-Key: $APIKEY'
+                    - -F
+                    - "project=2725b447-95a9-402f-8a4e-9908a2fe56e6"
+                    - -F 
+                    - 'bom=@/tmp/spring-project-cycdx-json.json'
+                    env:
+                    - name: APIKEY  # name of env var
+                      valueFrom:
+                        secretKeyRef:
+                          name: dependency-track-key     # name of an existing k8s secret
+                          key: api-key     # 'key' subcomponent of the secret
                 - name: create-deployment
                   inputs:
                     parameters:
