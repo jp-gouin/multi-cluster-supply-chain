@@ -47,7 +47,7 @@ helm install -n argo argoev -f deployments/argoev-values.yaml argo/argo-events
 # Create secrets
 1. Create the following secret on `chain-prod`
 ```
-kubectl create secret generic dev-kubeconfig -n argo --from-file kind-cluster/chain-deb.config
+kubectl create secret generic dev-kubeconfig -n argo --from-file kind-cluster/chain-dev.config
 ```
 
 2. Login to `DockerHub` using `docker login`
